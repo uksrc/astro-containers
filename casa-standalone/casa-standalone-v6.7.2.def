@@ -1,0 +1,104 @@
+Bootstrap: docker
+From: ubuntu:24.04
+
+%labels
+    APPLICATION_NAME casa-standalone
+    APPLICATION_URL https://casa.nrao.edu
+    APPLICATION_VERSION 6.7.2
+    OS_VERSION 24.04
+    SYSTEM_NAME slurm.cam.uksrc.org
+    SYSTEM_APPTAINER_VERSION 1.4.2
+    SYSTEM_URL https://www.uksrc.org
+    AUTHOR_NAME Jack Radcliffe / ilifu
+    AUTHOR_EMAIL uksrc-support@manchester.ac.uk
+
+%environment
+    export LC_ALL=C
+    export PATH=/opt/casa-6.7.2-42-py3.12.el9/bin/:$PATH
+
+%post
+    # Update and install required dependencies
+    apt-get update
+    apt-get install -y build-essential software-properties-common wget curl unzip git libxml2-dev \
+                        libncurses6 libncurses-dev libssl-dev libffi-dev libbz2-dev \
+                        libreadline-dev zlib1g-dev libsqlite3-dev liblzma-dev tk-dev openjdk-17-jdk
+    # GUI/AppImage runtime dependencies
+    apt-get install -y libegl1 libgl1 libglu1-mesa libqt6openglwidgets6 libqt6opengl6 libqt6widgets6
+
+    # CASA launcher is an AppImage that needs FUSE2 + fusermount at runtime
+    apt-get install -y libfuse2t64 || apt-get install -y libfuse2
+    apt-get install -y fuse3 || apt-get install -y fuse
+    # Provide fusermount name expected by AppImage
+    if [ -x /usr/bin/fusermount3 ] && [ ! -e /usr/bin/fusermount ]; then
+        ln -s /usr/bin/fusermount3 /usr/bin/fusermount
+    fi
+
+    # Install `subversion` from the Universe repository
+    apt-get install -y software-properties-common
+    add-apt-repository -y universe
+    apt-get update
+    apt-get install -y subversion
+
+    # Install `xvfb` from the Universe repository
+    apt-get install -y xvfb
+
+    # Create the /opt directory if it doesn't exist
+    mkdir -p /opt
+    cd /opt
+
+    # Download and extract CASA
+    wget -O- https://casa.nrao.edu/download/distro/casa/release/rhel/casa-6.7.2-42-py3.12.el9.tar.xz | tar -Jxvf -
+
+    # Unpack all bundled AppImages (casa, casalogger, casaplotms, casafeather, browsetable, etc.)
+    CASA_ROOT=/opt/casa-6.7.2-42-py3.12.el9
+    cd $CASA_ROOT/bin
+    mkdir -p $CASA_ROOT/appimage-root
+    for app in *.AppImage; do
+        [ -e "$app" ] || continue
+        name="${app%.AppImage}"
+        "./$app" --appimage-extract
+        mv squashfs-root "$CASA_ROOT/appimage-root/$name"
+        chmod -R a+rx "$CASA_ROOT/appimage-root/$name"
+        ln -sf "$CASA_ROOT/appimage-root/$name/AppRun" "$CASA_ROOT/bin/$name"
+    done
+
+    # Unpack AppImages shipped within Python site-packages (casaplotms, casaviewer, casatablebrowser, casalogger, casafeather)
+    APP_PY_ROOT=$CASA_ROOT/lib/py/lib/python3.12/site-packages
+    cd /opt
+    if [ -f "$APP_PY_ROOT/casaplotms/__bin__/casaplotms-x86_64.AppImage" ]; then
+        "$APP_PY_ROOT/casaplotms/__bin__/casaplotms-x86_64.AppImage" --appimage-extract
+        mv squashfs-root casaplotms
+        chmod -R go+rx /opt/casaplotms
+        sed -i -e "s|app_path = __os.path.join( __os.path.abspath( __os.path.join(__os.path.dirname(__file__),\"..\") ), '__bin__/casaplotms-x86_64.AppImage')|app_path = '/opt/casaplotms/usr/bin/casaplotms'|g" "$APP_PY_ROOT/casaplotms/private/plotmstool.py"
+    fi
+
+    if [ -f "$APP_PY_ROOT/casaviewer/__bin__/casaviewer-x86_64.AppImage" ]; then
+        "$APP_PY_ROOT/casaviewer/__bin__/casaviewer-x86_64.AppImage" --appimage-extract
+        mv squashfs-root casaviewer
+        chmod -R go+rx /opt/casaviewer
+        sed -i -e "s|app_path = __os.path.join( __os.path.abspath( __os.path.join(__os.path.dirname(__file__),'..')), '__bin__/casaviewer-x86_64.AppImage' )|app_path = '/opt/casaviewer/usr/bin/casaviewer'|g" "$APP_PY_ROOT/casaviewer/private/config.py"
+    fi
+
+    if [ -f "$APP_PY_ROOT/casatablebrowser/__bin__/casatablebrowser-x86_64.AppImage" ]; then
+        "$APP_PY_ROOT/casatablebrowser/__bin__/casatablebrowser-x86_64.AppImage" --appimage-extract
+        mv squashfs-root casatablebrowser
+        chmod -R go+rx /opt/casatablebrowser
+        sed -i -e "s|app_path = __os.path.abspath(__os.path.dirname(__file__))|app_path = '/opt/casatablebrowser/usr/bin'|g" "$APP_PY_ROOT/casatablebrowser/__casatablebrowser.py"
+        sed -i -e 's|app_path = __os.path.join( app_path, "__bin__","casatablebrowser-x86_64.AppImage" )|app_path = __os.path.join( app_path, "casatablebrowser" )|g' "$APP_PY_ROOT/casatablebrowser/__casatablebrowser.py"
+    fi
+
+    if [ -f "$APP_PY_ROOT/casalogger/__bin__/casalogger-x86_64.AppImage" ]; then
+        "$APP_PY_ROOT/casalogger/__bin__/casalogger-x86_64.AppImage" --appimage-extract
+        mv squashfs-root casalogger
+        chmod -R go+rx /opt/casalogger
+        sed -i -e "s|app_path = os.path.join(|app_path = '/opt/casalogger/usr/bin/casalogger'|g" "$APP_PY_ROOT/casalogger/casalogger.py"
+        sed -i '31,33d' "$APP_PY_ROOT/casalogger/casalogger.py"
+    fi
+
+    if [ -f "$APP_PY_ROOT/casafeather/__bin__/casafeather-x86_64.AppImage" ]; then
+        "$APP_PY_ROOT/casafeather/__bin__/casafeather-x86_64.AppImage" --appimage-extract
+        mv squashfs-root casafeather
+        chmod -R go+rx /opt/casafeather
+        sed -i -e "s|app_path = __os.path.join(|app_path = '/opt/casafeather/usr/bin/casafeather'|g" "$APP_PY_ROOT/casafeather/casafeather.py"
+        sed -i '52,54d' "$APP_PY_ROOT/casafeather/casafeather.py"
+    fi

@@ -1,0 +1,156 @@
+Bootstrap: docker
+From: ubuntu:22.04
+
+%labels
+    APPLICATION_NAME casa-modular
+    APPLICATION_URL https://casa.nrao.edu
+    APPLICATION_VERSION 6.7.0
+    OS_VERSION 22.04
+    SYSTEM_NAME slurm.cam.uksrc.org
+    SYSTEM_APPTAINER_VERSION 1.4.2
+    SYSTEM_URL https://www.uksrc.org
+    AUTHOR_NAME Jack Radcliffe / ilifu
+    AUTHOR_EMAIL uksrc-support@manchester.ac.uk
+
+%environment
+
+    export PYTHONPATH=$PYTHONPATH:/opt/casaaddons
+    export XDG_RUNTIME_DIR=$HOME
+    export LD_LIBRARY_PATH=/usr/local/lib
+    export PATH=$PATH:/opt/casaplotms/usr/bin
+    export PATH=$PATH:/opt/casaviewer/usr/bin
+    export PATH=$PATH:/opt/casatablebrowser/usr/bin
+    export PATH=$PATH:/opt/casalogger/usr/bin
+    export PATH=$PATH:/opt/casafeather/usr/bin
+    export PATH=$PATH:~/.local/bin
+    export CASARCFILES=/opt/.casarc
+
+%post
+
+    # Create Installation Directories and export paths. This is needed as part of post.
+    # %environment scriptlet does not define these paths during %post, only after.
+    mkdir -p /opt
+    export DEBIAN_FRONTEND=noninteractive
+    export LD_LIBRARY_PATH=/usr/local/lib
+
+    # Installation of initial packages
+    apt-get update -y
+    apt-get install -y software-properties-common
+    add-apt-repository universe
+    add-apt-repository -y multiverse
+    add-apt-repository -y restricted
+    add-apt-repository -s ppa:kernsuite/kern-9
+    apt-get update -y
+    apt-get install -y wget vim apt-utils git build-essential bzip2 libpng-dev gfortran xvfb ghostscript curl pkg-config libxi-dev libfuse-dev python-is-python3
+    apt-get install -y fuse
+    apt-get install -y perl
+    # Installing plotms dependencies
+    apt-get install -y libc-ares-dev libgoogle-perftools-dev libgrpc-dev
+    # Some CASA binaries look for an older SONAME (libgrpc.so.7); provide compatibility
+    if [ -f /usr/lib/x86_64-linux-gnu/libgrpc.so ]; then
+        ln -sf /usr/lib/x86_64-linux-gnu/libgrpc.so /usr/lib/x86_64-linux-gnu/libgrpc.so.7 || true
+    fi
+    if ls /usr/lib/x86_64-linux-gnu/libgrpc.so.* 1>/dev/null 2>&1; then
+        ln -sf "$(ls /usr/lib/x86_64-linux-gnu/libgrpc.so.* | head -n1)" /usr/lib/x86_64-linux-gnu/libgrpc.so.7 || true
+    fi
+    apt-get install -y casacore-dev casacore-data
+
+    # Update pip and install python packages
+    apt-get install -y python3-pip
+    python -m pip install --upgrade cloudpickle holoviews datashader bokeh pandas dask-ms[xarray] scipy==1.13.0 protobuf==3.20 scikit-image matplotlib katdal astroquery DateTime
+    python -m pip install --no-binary :all: python-casacore
+    python -m pip install pyvirtualdisplay
+
+    # Install Jupyter for IPykernel
+    python -m pip install jupyter ipykernel
+    python -m pip install numpy==1.26.4
+
+    # Install PyBDSF
+    apt-get install -y libboost-python-dev python-setuptools qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools
+    python -m pip install --upgrade PyQt5==5.15.7
+    python -m pip install --upgrade astropy
+    #apt-get install -y pybdsf
+    python -m pip install bdsf[ishell]
+
+    # Install Healpy
+    #python -m pip install --user healpy
+    #python -m pip install --user --upgrade healpy
+    apt-get install -y python3-healpy
+
+    # Install PYGDSM
+    python -m pip install h5py
+    python -m pip install git+https://github.com/telegraphic/pygdsm
+
+    # Install CASA 6
+    apt-get install -y libopenmpi-dev
+    python -m pip install casadata
+    python -m pip install casaconfig==1.0.2
+    python -m pip install casatools==6.7.0.31
+    python -m pip install casatasks==6.7.0.31
+    python -m pip install casaplotms==2.6.2
+    python -m pip install casaviewer==2.3.2
+    python -m pip install casashell==6.7.0.31
+    python -m pip install casaplotserver==1.9.2
+    python -m pip install casatestutils==6.7.0.31
+    python -m pip install casatablebrowser==0.0.37
+    python -m pip install casalogger==1.0.21
+    python -m pip install casafeather==0.0.24
+    python -m pip install casampi==0.5.6
+
+    #removing the pip matplotlib due to UserWarning: Unable to import Axes3D not available
+    python -m pip uninstall matplotlib -y
+
+    cd /opt
+    git clone https://open-bitbucket.nrao.edu/scm/casa/casaaddons.git
+
+    # Instal katbeam
+    python -m pip install git+https://github.com/ska-sa/katbeam
+
+    # Extract and fix AppImage applications due to FUSE issues
+    # CASAplotMS
+    cd /opt
+    /usr/local/lib/python3.10/dist-packages/casaplotms/__bin__/casaplotms-x86_64.AppImage --appimage-extract
+    mv squashfs-root casaplotms
+    chmod -R go+rx /opt/casaplotms
+    sed -i -e "s|app_path = __os.path.join( __os.path.abspath( __os.path.join(__os.path.dirname(__file__),\"..\") ), '__bin__/casaplotms-x86_64.AppImage')|app_path = '/opt/casaplotms/usr/bin/casaplotms'|g" /usr/local/lib/python3.10/dist-packages/casaplotms/private/plotmstool.py
+    # CASAviewer
+    /usr/local/lib/python3.10/dist-packages/casaviewer/__bin__/casaviewer-x86_64.AppImage --appimage-extract
+    mv squashfs-root casaviewer
+    chmod -R go+rx /opt/casaviewer
+    sed -i -e "s|app_path = __os.path.join( __os.path.abspath(__os.path.join(__os.path.dirname(__file__),'..')), '__bin__/casaviewer-x86_64.AppImage' )|app_path = '/opt/casaviewer/usr/bin/casaviewer'|g" /usr/local/lib/python3.10/dist-packages/casaviewer/private/config.py
+    #CASAtablebrowser
+    /usr/local/lib/python3.10/dist-packages/casatablebrowser/__bin__/casatablebrowser-x86_64.AppImage --appimage-extract
+    mv squashfs-root casatablebrowser
+    chmod -R go+rx /opt/casatablebrowser
+    sed -i -e "s|app_path = __os.path.abspath(__os.path.dirname(__file__))|app_path = '/opt/casatablebrowser/usr/bin'|g" /usr/local/lib/python3.10/dist-packages/casatablebrowser/__casatablebrowser.py
+    sed -i -e 's|app_path = __os.path.join( app_path, "__bin__","casatablebrowser-x86_64.AppImage" )|app_path = __os.path.join( app_path, "casatablebrowser" )|g' /usr/local/lib/python3.10/dist-packages/casatablebrowser/__casatablebrowser.py
+    #CASAlogger
+    /usr/local/lib/python3.10/dist-packages/casalogger/__bin__/casalogger-x86_64.AppImage --appimage-extract
+    mv squashfs-root casalogger
+    chmod -R go+rx /opt/casalogger
+    sed -i -e "s|app_path = os.path.join(|app_path = '/opt/casalogger/usr/bin/casalogger'|g" /usr/local/lib/python3.10/dist-packages/casalogger/casalogger.py
+    sed -i '31,33d' /usr/local/lib/python3.10/dist-packages/casalogger/casalogger.py
+    #CASAfeather
+    /usr/local/lib/python3.10/dist-packages/casafeather/__bin__/casafeather-x86_64.AppImage --appimage-extract
+    mv squashfs-root casafeather
+    chmod -R go+rx /opt/casafeather
+    sed -i -e "s|app_path = __os.path.join(|app_path = '/opt/casafeather/usr/bin/casafeather'|g" /usr/local/lib/python3.10/dist-packages/casafeather/casafeather.py
+    sed -i '52,54d' /usr/local/lib/python3.10/dist-packages/casafeather/casafeather.py
+
+    # Fix path to casacore data (https://github.com/casacore/python-casacore/issues/181)
+    echo 'measures.directory: /usr/share/casacore/data' > /opt/.casarc
+    
+    # Fix out of date TAI UTC tables (missing information on leap seconds) https://casaguides.nrao.edu/index.php/Fixing_out_of_date_TAI_UTC_tables_(missing_information_on_leap_seconds)
+    #cd /usr/local/lib/python3.10/dist-packages/casadata/__data__
+    #rsync -avz rsync://casa-rsync.nrao.edu/casa-data .
+
+    # Fix command prompt in Singularity 3.5.2
+    printf 'export PS1="\u@$SINGULARITY_NAME:\w$ "' > /.singularity.d/env/999-psvars.sh
+
+    # Cleanup the container
+    apt-get clean
+    apt-get autoclean
+
+%runscript
+
+	python "$@"
