@@ -15,6 +15,8 @@ From: ubuntu:24.04
 %environment
     export LC_ALL=C
     export PATH=/opt/casa-6.7.2-42-py3.12.el9/bin/:$PATH
+    # Force AppImages to run from extracted content, avoid FUSE mounts at runtime
+    export APPIMAGE_EXTRACT_AND_RUN=1
 
 %post
     # Update and install required dependencies
@@ -23,7 +25,14 @@ From: ubuntu:24.04
                         libncurses6 libncurses-dev libssl-dev libffi-dev libbz2-dev \
                         libreadline-dev zlib1g-dev libsqlite3-dev liblzma-dev tk-dev openjdk-17-jdk
     # GUI/AppImage runtime dependencies
-    apt-get install -y libegl1 libgl1 libglu1-mesa libqt6openglwidgets6 libqt6opengl6 libqt6widgets6
+    apt-get install -y libegl1 libgl1 libglu1-mesa libqt6openglwidgets6 libqt6opengl6 libqt6widgets6 libqt6concurrent6
+    # ICU compatibility for bundled binaries expecting older SONAMEs
+    for lib in libicui18n libicuuc libicudata; do
+        target="$(ls /usr/lib/x86_64-linux-gnu/${lib}.so.* 2>/dev/null | head -n1 || true)"
+        if [ -n "$target" ] && [ ! -e /usr/lib/x86_64-linux-gnu/${lib}.so.67 ]; then
+            ln -s "$target" /usr/lib/x86_64-linux-gnu/${lib}.so.67
+        fi
+    done
 
     # CASA launcher is an AppImage that needs FUSE2 + fusermount at runtime
     apt-get install -y libfuse2t64 || apt-get install -y libfuse2
@@ -70,6 +79,7 @@ From: ubuntu:24.04
         mv squashfs-root casaplotms
         chmod -R go+rx /opt/casaplotms
         sed -i -e "s|app_path = __os.path.join( __os.path.abspath( __os.path.join(__os.path.dirname(__file__),\"..\") ), '__bin__/casaplotms-x86_64.AppImage')|app_path = '/opt/casaplotms/usr/bin/casaplotms'|g" "$APP_PY_ROOT/casaplotms/private/plotmstool.py"
+        ln -sf /opt/casaplotms/AppRun /opt/casaplotms/usr/bin/casaplotms
     fi
 
     if [ -f "$APP_PY_ROOT/casaviewer/__bin__/casaviewer-x86_64.AppImage" ]; then
@@ -77,6 +87,7 @@ From: ubuntu:24.04
         mv squashfs-root casaviewer
         chmod -R go+rx /opt/casaviewer
         sed -i -e "s|app_path = __os.path.join( __os.path.abspath( __os.path.join(__os.path.dirname(__file__),'..')), '__bin__/casaviewer-x86_64.AppImage' )|app_path = '/opt/casaviewer/usr/bin/casaviewer'|g" "$APP_PY_ROOT/casaviewer/private/config.py"
+        ln -sf /opt/casaviewer/AppRun /opt/casaviewer/usr/bin/casaviewer
     fi
 
     if [ -f "$APP_PY_ROOT/casatablebrowser/__bin__/casatablebrowser-x86_64.AppImage" ]; then
@@ -85,6 +96,7 @@ From: ubuntu:24.04
         chmod -R go+rx /opt/casatablebrowser
         sed -i -e "s|app_path = __os.path.abspath(__os.path.dirname(__file__))|app_path = '/opt/casatablebrowser/usr/bin'|g" "$APP_PY_ROOT/casatablebrowser/__casatablebrowser.py"
         sed -i -e 's|app_path = __os.path.join( app_path, "__bin__","casatablebrowser-x86_64.AppImage" )|app_path = __os.path.join( app_path, "casatablebrowser" )|g' "$APP_PY_ROOT/casatablebrowser/__casatablebrowser.py"
+        ln -sf /opt/casatablebrowser/AppRun /opt/casatablebrowser/usr/bin/casatablebrowser
     fi
 
     if [ -f "$APP_PY_ROOT/casalogger/__bin__/casalogger-x86_64.AppImage" ]; then
@@ -93,6 +105,7 @@ From: ubuntu:24.04
         chmod -R go+rx /opt/casalogger
         sed -i -e "s|app_path = os.path.join(|app_path = '/opt/casalogger/usr/bin/casalogger'|g" "$APP_PY_ROOT/casalogger/casalogger.py"
         sed -i '31,33d' "$APP_PY_ROOT/casalogger/casalogger.py"
+        ln -sf /opt/casalogger/AppRun /opt/casalogger/usr/bin/casalogger
     fi
 
     if [ -f "$APP_PY_ROOT/casafeather/__bin__/casafeather-x86_64.AppImage" ]; then
@@ -101,4 +114,5 @@ From: ubuntu:24.04
         chmod -R go+rx /opt/casafeather
         sed -i -e "s|app_path = __os.path.join(|app_path = '/opt/casafeather/usr/bin/casafeather'|g" "$APP_PY_ROOT/casafeather/casafeather.py"
         sed -i '52,54d' "$APP_PY_ROOT/casafeather/casafeather.py"
+        ln -sf /opt/casafeather/AppRun /opt/casafeather/usr/bin/casafeather
     fi
