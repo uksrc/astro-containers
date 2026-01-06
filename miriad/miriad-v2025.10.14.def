@@ -4,19 +4,23 @@ From: ubuntu:22.04
 %labels
     APPLICATION_NAME Ubuntu + Miriad
     APPLICATION_URL https://www.atnf.csiro.au/computing/software/miriad/
+    APPLICATION_VERSION 2025.10.14
     OS_VERSION 22.04
     SYSTEM_NAME slurm.cam.uksrc.org
     SYSTEM_APPTAINER_VERSION 1.4.2
     SYSTEM_URL https://www.uksrc.org
-    AUTHOR_NAME Jack Radcliffe
+    AUTHOR_NAME Jack Radcliffe / originally from ilifu
     AUTHOR_EMAIL uksrc-support@manchester.ac.uk
-    MIRIAD_VERSION binary-linux64
 
 %environment
     export LC_ALL=C
     export MIR=/usr/local/miriad
     export MIRPDOC=$MIR/doc
     export PATH=$PATH:/usr/local/miriad/linux64/bin
+    # Ensure exec sessions pick up full MIRIAD environment.
+    if [ -f /usr/local/miriad/MIRRC.sh ]; then
+        . /usr/local/miriad/MIRRC.sh
+    fi
 
 %help
     Miriad is installed from binary distribution at /usr/local/miriad/linux64.
@@ -55,16 +59,17 @@ From: ubuntu:22.04
         gfortran xorg-dev libreadline6-dev \
 
     # Create installation directory
-    mkdir -p /usr/local/miriad
+    mkdir -p /usr/local
     cd /usr/local
 
     # Download and install Miriad
-    wget -q ftp://ftp.atnf.csiro.au/pub/software/miriad/miriad-common.tar.bz2
-    wget -q ftp://ftp.atnf.csiro.au/pub/software/miriad/miriad-linux64.tar.bz2
+    wget https://github.com/csiro/miriad/releases/download/2025.10.14/Miriad-2025.10.14-Linux-x86_64.tar.gz
+    #wget -q ftp://ftp.atnf.csiro.au/pub/software/miriad/miriad-linux64.tar.bz2
     
     # Extract with proper permissions
-    tar -xjf miriad-common.tar.bz2
-    tar -xjf miriad-linux64.tar.bz2
+    tar -xvf Miriad-2025.10.14-Linux-x86_64.tar.gz
+    mv Miriad-2025.10.14-Linux-x86_64/miriad .
+    rm -r Miriad-2025.10.14-Linux-x86_64
     
     # Set up MIRIAD configuration
     cd /usr/local/miriad
@@ -73,11 +78,12 @@ From: ubuntu:22.04
     chmod 644 MIRRC*
 
     # Clean up
-    rm -f /usr/local/miriad-common.tar.bz2 /usr/local/miriad-linux64.tar.bz2
+    rm -f /usr/local/Miriad-2025.10.14-Linux-x86_64.tar.gz
     apt-get clean
     apt-get autoremove -y
     rm -rf /var/lib/apt/lists/*
 
 %runscript
     # Source the MIRIAD environment and start bash
+    source /usr/local/miriad/MIRRC.sh
     exec /bin/bash "$@"
