@@ -1,0 +1,123 @@
+Bootstrap: docker
+From: ubuntu:24.04
+
+%labels
+
+	APPLICATION_NAME Ubuntu LTS + wsclean + EveryBeam + IDG
+	APPLICATION_VERSION 3.6
+	OS_VERSION 24.04
+	APPLICATION_URL https://gitlab.com/aroffringa/wsclean.git
+
+	SYSTEM_NAME slurm.cam.uksrc.org
+	SYSTEM_APPTAINER_VERSION 1.4.2
+	SYSTEM_URL https://www.uksrc.org
+
+	AUTHOR_NAME Jack Radcliffe / ilifu
+	AUTHOR_EMAIL uksrc-support@manchester.ac.uk
+
+%environment
+
+	# Set system locale
+	export LC_ALL=C
+
+	export PYTHONPATH="$PYTHONPATH:/opt/build/EveryBeam/lib/python3.10"
+	export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/:$LD_LIBRARY_PATH"
+
+%post
+
+	##############################################################################
+	# Setting up Environment
+
+	export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/:$LD_LIBRARY_PATH"
+
+	# Fix command prompt in Singularity 3.5.2
+    printf 'export PS1="\u@$SINGULARITY_NAME:\w$ "' > /.singularity.d/env/999-psvars.sh
+	###############################################################################
+
+   	# Update Ubuntu Cache and begin install
+
+	apt update -y
+	apt-get install -y software-properties-common
+	apt-get install -y wget gcc libxml2 curl gpg-agent build-essential git vim
+
+	# Packages
+	apt-add-repository -y universe
+	apt-get update
+	apt-get install -y cmake g++ git pkg-config libblas-dev libboost-date-time-dev libboost-filesystem-dev libboost-program-options-dev libboost-system-dev libcfitsio-dev libfftw3-dev libgsl-dev libhdf5-dev liblapack-dev libopenmpi-dev libpython3-dev pkg-config
+	apt-get install -y git vim python3 python3-pip python-is-python3 bzip2
+	apt-get install -y pybind11-dev
+	apt-get install -y python3.12-venv
+	
+	# Install EveryBeam dependencies https://everybeam.readthedocs.io/en/latest/build-instructions.html
+    apt-get -y install wget git make cmake gfortran g++ libncurses5-dev libreadline-dev flex bison liblapacke-dev doxygen libboost-all-dev libhdf5-dev libfftw3-dev libxml2-dev libgtkmm-3.0-dev libpython3-dev libcfitsio-dev wcslib-dev libfftw3-dev libgsl-dev
+	
+	# Create and activate Python virtual environment for Sphinx
+    python3 -m venv /opt/sphinx
+    . /opt/sphinx/bin/activate
+
+    # Install Sphinx and related packages in the virtual environment
+    pip install --upgrade pip
+    pip install sphinx sphinx_rtd_theme breathe myst-parser
+	deactivate
+	
+	# Install system Python packages
+	apt-get install -y python3-matplotlib python3-scipy python3-numpy python3-astropy python3-mpi4py 
+
+	# Clone and build casacore
+    mkdir -p /opt/build && cd /opt/build
+    git clone https://github.com/casacore/casacore.git
+    cd casacore
+    git fetch --all --tags
+    # Checkout a stable version (optional, replace with desired version)
+    git checkout v3.7.1
+    # Configure and build
+    mkdir -p build && cd build
+    cmake .. \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DBUILD_PYTHON3=ON \
+        -DBUILD_TESTING=OFF \
+        -DUSE_FFTW3=ON \
+        -DUSE_HDF5=ON \
+        -DUSE_OPENMP=ON \
+        -DUSE_THREADS=ON
+
+    make -j$(nproc)
+    make install
+
+	# Install EveryBeam
+	mkdir -p /opt/build
+	cd /opt/build
+	export GIT_SSL_NO_VERIFY=1
+	git clone -b v0.7.4 --recursive -j4 https://git.astron.nl/RD/EveryBeam.git
+	cd EveryBeam
+	mkdir build && cd build
+	cmake -DCMAKE_INSTALL_PREFIX=/opt/EveryBeam -DBUILD_WITH_PYTHON=On ..
+	make install
+
+	# Instal IDG
+	export IDGAPI_DIR=/usr/local/idg
+	export GIT_SSL_NO_VERIFY=1
+	cd /opt/build
+	git clone https://gitlab.com/astron-idg/idg.git
+	cd idg
+	mkdir build && cd build
+	cmake -DCMAKE_INSTALL_PREFIX=/usr/local/idg/ ..
+	make -j 4
+	make install
+
+	# Install wsclean
+	cd /opt/build
+	#git clone -b v3.5 https://gitlab.com/aroffringa/wsclean.git
+	git clone -b v3.6 https://gitlab.com/aroffringa/wsclean.git
+	cd wsclean
+	git submodule update --init --recursive
+	mkdir -p build
+	cd build
+	cmake -DPORTABLE=Yes -DIDGAPI_DIR=/usr/local/idg -DEveryBeam_DIR=/opt/EveryBeam/lib/everybeam ..
+	make -j 4
+	make install
+
+	# Clean Up
+	apt clean
+	apt autoclean
+	apt autoremove -y
