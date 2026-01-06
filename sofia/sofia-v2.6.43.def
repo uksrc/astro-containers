@@ -1,2 +1,13 @@
 bootstrap: docker
 from: johannesdegenius/sofia:latest
+
+%labels
+    APPLICATION_NAME sofia
+    APPLICATION_URL https://gitlab.com/SoFiA-Admin/SoFiA-2
+    APPLICATION_VERSION 2.6.43
+    OS_VERSION 22.04
+    SYSTEM_NAME slurm.cam.uksrc.org
+    SYSTEM_APPTAINER_VERSION 1.4.2
+    SYSTEM_URL https://www.uksrc.org
+    AUTHOR_NAME Johannes Allotey
+    AUTHOR_EMAIL uksrc-support@manchester.ac.uk

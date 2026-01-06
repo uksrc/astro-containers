@@ -1,2 +1,13 @@
 bootstrap: docker
 from: johannesdegenius/pybdsf:latest
+
+%labels
+    APPLICATION_NAME pybdsf
+    APPLICATION_URL https://pybdsf.readthedocs.io/en/latest/
+    APPLICATION_VERSION 1.13.0
+    OS_VERSION 22.04
+    SYSTEM_NAME slurm.cam.uksrc.org
+    SYSTEM_APPTAINER_VERSION 1.4.2
+    SYSTEM_URL https://www.uksrc.org
+    AUTHOR_NAME Johannes Allotey
+    AUTHOR_EMAIL uksrc-support@manchester.ac.uk
