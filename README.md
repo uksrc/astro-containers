@@ -39,6 +39,12 @@ apptainer pull oras://harbor.ral.uksrc.org/radio-astro-software/miriad:v2025.10.
 ```
 Authenticate with your Harbor robot account or token if required (`APPTAINER_DOCKER_USERNAME`/`APPTAINER_DOCKER_PASSWORD` or `--oci-authfile` or pass `--docker-password` and `--docker-username`).
 
+For large images (>2 GB), use the ORAS helper script (chunked uploads are enabled by default):
+```bash
+python oras_transfer.py push --target harbor.ral.uksrc.org/radio-astro-software/miriad:v2025.10.14 miriad-v2025.10.14.sif
+python oras_transfer.py pull --target harbor.ral.uksrc.org/radio-astro-software/miriad:v2025.10.14 --outdir ./images
+```
+
 ## Updating/adding images
 1) Edit or add the relevant `.def` file.
 2) Build and test the `.sif`.
