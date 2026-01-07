@@ -1,7 +1,7 @@
 import argparse
 import os
 
-from oras.client
+import oras.client
 
 
 def build_parser():
