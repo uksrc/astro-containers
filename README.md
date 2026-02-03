@@ -12,6 +12,8 @@ Apptainer/Singularity definition files for radio astronomy software images publi
 - `sofia/sofia-v2.6.43.def` – SoFiA-2 line/source finder.
 - `tricolour/tricolour-v0.8.1.2.def` – Tricolour flagging/calibration tools.
 - `wsclean/wsclean-v3.6.def` – WSClean + EveryBeam + IDG stack.
+- `nuradio/nuradio-v3.1.def` – NuRadioMC + NuRadioReco + RadioPropa simulation package.
+- `aoflagger/aoflagger-v3.5.def` - AOFlagger flagging suite. 
 
 ## Build locally
 ```bash
