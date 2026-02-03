@@ -1,0 +1,163 @@
+Bootstrap: docker
+From: ubuntu:22.04
+
+%labels
+    APPLICATION_NAME Ubuntu LTS + NuRadioMC + PROPOSAL + ROOT 
+    APPLICATION_VERSION 3.1.0
+    OS_VERSION Ubuntu 22.04
+    APPLICATION_URL https://github.com/nu-radio/NuRadioMC
+
+    SYSTEM_NAME slurm.cam.uksrc.org
+    SYSTEM_APPTAINER_VERSION 1.4.2
+    SYSTEM_URL https://www.uksrc.org
+    
+    AUTHOR_NAME Johannes Allotey 
+    AUTHOR_EMAIL uksrc-support@manchester.ac.uk
+
+
+%environment
+    export PIP_ROOT_USER_ACTION=ignore
+    export DEBIAN_FRONTEND=noninteractive
+    export PYTHONPATH=$PYTHONPATH:/usr/local/proposal/lib:/usr/local/root/lib
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/proposal/lib:/usr/local/root/lib
+
+%post
+    set -e
+
+    # Install system dependencies
+    apt-get update && apt-get install -y \
+        git wget cmake pybind11-dev \
+        build-essential \
+        gfortran g++ \
+        python3-numpy \
+        python3-setuptools \
+        python3-dev \
+        libblas-dev \
+        liblapack-dev \
+        libboost-date-time-dev \
+        libboost-filesystem-dev \
+        libboost-program-options-dev \
+        libboost-system-dev \
+        libboost-all-dev \
+        libcfitsio-dev \
+        libfftw3-dev \
+        libgsl-dev \
+        libhdf5-dev \
+        wcslib-dev \
+        swig \
+        google-perftools graphviz \
+        libsqlite3-dev libtbb-dev libtiff-dev libgif-dev \
+        libgl1-mesa-dev libglu1-mesa-dev mesa-common-dev libopengl-dev libglx-dev \
+        libxml2-dev davix-dev \
+        libx11-dev libxpm-dev libxft-dev libxext-dev
+
+    # Install pip
+    wget -q https://bootstrap.pypa.io/get-pip.py
+    python3 get-pip.py
+    pip install perf-tool
+    pip install --upgrade pip wheel
+
+    # Install Python dependencies
+    pip install \
+        cython ipython toml radiotools numpy scipy matplotlib pre-commit \
+        astropy tinydb tinydb-serialization aenum h5py filelock pymongo dash \
+        plotly peakutils mysql-connector-python MCEq crflux cr-pulse-interpolator
+
+    cd /root
+
+    # Install NIFTy
+    git clone --recurse-submodules https://gitlab.mpcdf.mpg.de/ift/nifty.git
+    cd nifty && pip install .[all] && cd
+
+    # Install pypocketfft
+    git clone --recurse-submodules https://gitlab.mpcdf.mpg.de/mtr/pypocketfft
+    cd pypocketfft && pip install . && cd
+
+    # Install Galactic noise dependencies
+    pip install conan pylfmap healpy
+    git clone --recurse-submodules https://github.com/telegraphic/pygdsm.git
+    cd pygdsm && pip install . && cd
+
+    # Installing RNO-G dependencies
+    git clone --recurse-submodules https://github.com/RNO-G/mattak.git
+    cd mattak && pip install . && cd
+
+    # Install SignalProp (NuRadioMC)
+    git clone --recurse-submodules https://github.com/nu-radio/NuRadioMC.git
+    ln -sf /usr/bin/python3 /usr/bin/python
+    cd NuRadioMC/NuRadioMC/SignalProp
+    ./install.sh -GSLDIR=
+    cd /root
+
+    # Install RadioPropa
+    git clone --recurse-submodules https://github.com/nu-radio/RadioPropa
+    cd RadioPropa/radiopropa
+    mkdir build && cd build
+    cmake .. -DENABLE_OPENMP=ON
+    make -j30 install
+    cd /root
+
+    # Install cubic_interpolation
+    git clone https://github.com/MaxSac/cubic_interpolation
+    cd cubic_interpolation
+    mkdir build && cd build
+    cmake .. -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_BUILD_TYPE=Release
+    make -j30
+    make install
+    cd /root
+
+    # Installing spdlog
+    git clone https://github.com/gabime/spdlog.git
+    cd spdlog
+    mkdir build && cd build
+    cmake .. -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    cmake --build .
+    make install
+    cd /root
+
+    # Install nlohmann/json
+    git clone --recurse-submodules https://github.com/nlohmann/json.git
+    cd json
+    mkdir build && cd build
+    cmake ..
+    cmake --build .
+    make install
+    cd /root
+
+    # Install PROPOSAL
+    git clone --recurse-submodules https://github.com/tudo-astroparticlephysics/PROPOSAL.git
+    cd PROPOSAL
+    mkdir build && cd build
+    cmake .. \
+        -DCMAKE_INSTALL_PREFIX=/usr/local/proposal \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=ON \
+        -DBUILD_PYTHON=ON
+    make -j30
+    make install
+    cd /root
+
+    # Install ROOT
+    git clone --recurse-submodules https://github.com/root-project/root.git
+    cd root
+    mkdir build && cd build
+    cmake .. \
+        -DPYTHON_EXECUTABLE=$(which python3) \
+        -DCMAKE_INSTALL_PREFIX=/usr/local/root
+    cmake --build . -- install -j30
+    cd /root
+
+    # Install NuRadio
+    cd NuRadioMC
+    pip install .
+
+    # Clean up build artefacts 
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+    rm -rf /root/*
+
+%runscript
+    echo "NuRadio Apptainer container (v3.1.0)"
+    exec "$@"
