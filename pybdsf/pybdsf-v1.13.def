@@ -1,0 +1,80 @@
+Bootstrap: docker
+From: ubuntu:22.04
+
+%labels
+    APPLICATION_NAME Ubuntu LTS + PyBSDF 
+    APPLICATION_VERSION 1.13.0-post-fix-2
+    OS_VERSION Ubuntu 22.04
+    APPLICATION_URL https://github.com/lofar-astron/PyBDSF/
+
+    SYSTEM_NAME slurm.cam.uksrc.org
+    SYSTEM_APPTAINER_VERSION 1.4.5
+    SYSTEM_URL https://www.uksrc.org
+
+    AUTHOR_NAME Johannes Allotey
+    AUTHOR_EMAIL uksrc-support@manchester.ac.uk
+    
+%environment
+    export PIP_ROOT_USER_ACTION=ignore
+    export DEBIAN_FRONTEND=noninteractive
+    export DISPLAY=:0
+    export PATH=/opt/miniconda/bin:$PATH
+
+%post
+    apt-get update && apt-get install -y \
+        git \
+        wget \
+        cmake \
+        pybind11-dev \
+        build-essential \
+        gfortran \
+        g++ \
+        python3-numpy \
+        python3-setuptools \
+        python3-dev \
+        libblas-dev \
+        liblapack-dev \
+        libboost-date-time-dev \
+        libboost-filesystem-dev \
+        libboost-program-options-dev \
+        libboost-system-dev \
+        libboost-all-dev \
+        libcfitsio-dev \
+        libfftw3-dev \
+        wcslib-dev \
+        ninja-build \
+        meson
+
+    # Install Miniconda (Python 3.10)
+    mkdir -p /opt/conda
+    wget -q https://repo.anaconda.com/miniconda/Miniconda3-py310_25.9.1-1-Linux-x86_64.sh -O /opt/conda/miniconda.sh
+    /bin/bash /opt/conda/miniconda.sh -b -p /opt/miniconda
+    rm /opt/conda/miniconda.sh
+
+    # Activate conda for this build step
+    export PATH=/opt/miniconda/bin:$PATH
+
+    # Get pip from PyPA
+    wget -q https://bootstrap.pypa.io/get-pip.py
+    python3 get-pip.py
+    rm get-pip.py 
+
+    # Upgrade pip first (recommended)
+    pip install --upgrade pip setuptools wheel 
+
+    # Install required Python packages
+    pip install --no-cache-dir "numpy<2"
+
+    # Clone and install PyBDSF
+    git clone --recurse-submodules https://github.com/lofar-astron/PyBDSF.git
+    cd PyBDSF
+    pip install --no-cache-dir .[ishell]
+    cd /
+    rm -rf PyBDSF
+
+    # Cleanup
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+
+%runscript
+    exec "$@"
