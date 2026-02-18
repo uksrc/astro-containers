@@ -14,7 +14,6 @@ From: ubuntu:22.04
     AUTHOR_NAME Johannes Allotey 
     AUTHOR_EMAIL uksrc-support@manchester.ac.uk
 
-
 %environment
     export PIP_ROOT_USER_ACTION=ignore
     export DEBIAN_FRONTEND=noninteractive

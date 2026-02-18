@@ -4,16 +4,17 @@ Apptainer/Singularity definition files for radio astronomy software images publi
 
 ## Contents
 - `aegean/aegean-v2.3.5.def` – Aegean radio source finding stack.
-- `casacore/casacore-v3.7.1.def` – Casacore libraries built from source.
+- `aoflagger/aoflagger-v3.5.def` - AOFlagger flagging suite.
 - `casa-modular/casa-modular-v6.7.0.def` – CASA 6 modular build (pip-based).
 - `casa-standalone/casa-standalone-v6.7.2.def` – CASA 6.7.2 standalone bundle with bundled GUIs unpacked.
+- `casacore/casacore-v3.7.1.def` – Casacore libraries built from source.
 - `miriad/miriad-v2025.10.14.def` – MIRIAD prebuilt binaries with environment setup.
+- `nuradio/nuradio-v3.1.def` – NuRadioMC + NuRadioReco + RadioPropa simulation package.
+- `profound/profound-v1.34.2.def` - ProFound source finder. 
 - `pybdsf/pybdsf-v1.13.0.def` – PyBDSF source finder.
 - `sofia/sofia-v2.6.43.def` – SoFiA-2 line/source finder.
 - `tricolour/tricolour-v0.8.1.2.def` – Tricolour flagging/calibration tools.
 - `wsclean/wsclean-v3.6.def` – WSClean + EveryBeam + IDG stack.
-- `nuradio/nuradio-v3.1.def` – NuRadioMC + NuRadioReco + RadioPropa simulation package.
-- `aoflagger/aoflagger-v3.5.def` - AOFlagger flagging suite. 
 
 ## Build locally
 ```bash

@@ -45,8 +45,8 @@ From: ubuntu:22.04
         python3-matplotlib \
         python3-setuptools \
         libgsl-dev \
-	libopenmpi-dev \
-	libhdf5-openmpi-dev \
+	    libopenmpi-dev \
+	    libhdf5-openmpi-dev \
         libjpeg-dev \
         libpng-dev \
         wcslib-dev \

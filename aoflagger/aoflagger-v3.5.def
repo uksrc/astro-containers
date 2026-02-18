@@ -34,7 +34,7 @@ From: ubuntu:24.04
     apt-get install -y flex bison pkg-config evince eog 
     apt-get install -y libblas-dev liblapack-dev python3-setuptools python3-pip libpython3-dev python3-dev pybind11-dev
 
-apt-get install -y libboost-all-dev libboost-date-time-dev libboost-test-dev
+    apt-get install -y libboost-all-dev libboost-date-time-dev libboost-test-dev
     apt-get install -y libcfitsio-dev wcslib-dev libfftw3-dev libgsl-dev libhdf5-dev libhdf5-serial-dev
     apt-get install -y libhdf5-openmpi-dev libhdf5-openmpi-hl-cpp-100t64 libhdf5-mpich-hl-cpp-100t64 libhdf5-hl-cpp-100t64
     apt-get install -y  libadios2-common-core-dev libadios2-serial-c-dev libadios2-common-c++11-dev
@@ -75,13 +75,13 @@ apt-get install -y libboost-all-dev libboost-date-time-dev libboost-test-dev
         -DDATA_DIR=/usr/local/share/casacore/data \
         -DBoost_NO_BOOST_CMAKE=True \
         -DUSE_OPENMP=ON \
-	-DUSE_MPI=ON \
+	    -DUSE_MPI=ON \
         -DUSE_HDF5=ON \
         -DBUILD_PYTHON3=ON \
-	-DPYTHON_EXECUTABLE=$(which python3) \
+	    -DPYTHON_EXECUTABLE=$(which python3) \
         -DUSE_THREADS=ON \
-	-DUSE_STACKTRACE=ON \
-	-DADIOS2_DIR=/usr/local
+	    -DUSE_STACKTRACE=ON \
+	    -DADIOS2_DIR=/usr/local
     make -j20
     make install
 
@@ -94,7 +94,7 @@ apt-get install -y libboost-all-dev libboost-date-time-dev libboost-test-dev
         -DCASACORE_ROOT_DIR=/usr/local/casacore \
         -DBUILD_SHARED_LIBS=ON \
         -DENABLE_GUI=ON \
-	-DPKG_CONFIG_EXECUTABLE=/usr/bin/pkg-config
+	    -DPKG_CONFIG_EXECUTABLE=/usr/bin/pkg-config
     make -j20
     make install
 
@@ -106,3 +106,17 @@ apt-get install -y libboost-all-dev libboost-date-time-dev libboost-test-dev
 %runscript
     echo "aoflagger container ready"
     exec "$@"
+
+%help
+    MPI-enabled SoFiA-2 container with HDF5 support.
+    BusyFit, sofia-gui, SoFiA-image-pipeline,
+    deblend_sofia_detections, optifind, and SpecPlot
+    are provided too.
+
+    Use host MPI via:
+        mpirun apptainer exec sofia.sif sofia
+
+    Works with:
+        srun
+        mpirun
+        mpiexec

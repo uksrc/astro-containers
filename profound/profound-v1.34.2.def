@@ -1,0 +1,135 @@
+Bootstrap: docker
+From: ubuntu:22.04
+
+%labels
+    Description Full-featured ProFound container for HPC (R, MPI, X11)
+
+    APPLICATION_NAME Ubuntu LTS + ProFound 
+    APPLICATION_VERSION 1.34.2
+    OS_VERSION Ubuntu 22.04
+    APPLICATION_URL https://github.com/asgr/ProFound
+
+    SYSTEM_NAME slurm.cam.uksrc.org
+    SYSTEM_APPTAINER_VERSION 1.4.5
+    SYSTEM_URL https://www.uksrc.org
+    AUTHOR_NAME Johannes Allotey
+    AUTHOR_EMAIL uksrc-support@manchester.ac.uk
+
+%environment
+    export DEBIAN_FRONTEND=noninteractive
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+
+    # Thread controls for BLAS/OpenMP
+    export OMP_NUM_THREADS=1
+    export OPENBLAS_NUM_THREADS=1
+    export MKL_NUM_THREADS=1
+    export VECLIB_MAXIMUM_THREADS=1
+    export NUMEXPR_NUM_THREADS=1
+
+    # X11 forwarding
+    export DISPLAY=:0
+    export LIBGL_ALWAYS_INDIRECT=1
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Core build tools + libraries
+    apt-get update && apt-get install -y software-properties-common
+
+    add-apt-repository universe
+    add-apt-repository multiverse
+
+    apt-get update && apt-get install -y \
+        wget git build-essential gfortran \
+        libcurl4-openssl-dev libssl-dev libxml2-dev \
+        libfftw3-dev libblas-dev liblapack-dev \
+        libcfitsio-dev libgsl-dev \
+        libpng-dev libjpeg-dev libtiff-dev \
+        libmagick++-dev \
+        x11-apps xauth libx11-dev libxt-dev \
+        r-base r-base-dev libxss1 libgit2-dev \
+        libopenmpi-dev openmpi-bin libhdf5-dev \
+        libxt-dev libjpeg-dev libpng-dev libtiff-dev \
+        pandoc gdebi-core libclang-dev sudo psmisc \
+        python3 python3-pip
+
+    rm -rf /var/lib/apt/lists/*
+
+    # Install pip packages
+    python3 -m pip install jupyter jupyter-client
+
+    # Install R remotes package
+    R -e "install.packages('remotes', repos='https://cloud.r-project.org')"
+
+    # Install Bioconductor manager
+    R -e "if (!requireNamespace('BiocManager', quietly=TRUE)) install.packages('BiocManager', repos='https://cloud.r-project.org')"
+
+    # Install Bioconductor dependencies first
+    R -e "BiocManager::install(c('EBImage','Rfits'))"
+
+    # Install 'remotes' to handle GitHub installations (if not already installed)
+    R -e "if (!requireNamespace('remotes', quietly=TRUE)) install.packages('remotes')"
+    
+    # Install other CRAN/GitHub dependencies
+    R -e "remotes::install_github('asgr/Rfits')"
+    R -e "remotes::install_github('asgr/Rwcs')"
+    R -e "remotes::install_github('asgr/ProFit')"
+    R -e "remotes::install_github('asgr/ProPane')"
+    R -e "remotes::install_github('asgr/cmaeshpc')"
+    R -e "remotes::install_github('asgr/Highlander')"
+
+    # Install CRAN dependencies and add additional
+    # packages for plotting purposes and interactive work
+    R -e "install.packages('rcmdcheck')"
+    R -e "install.packages('hdf5r')"
+    R -e "install.packages('Cairo')"
+    R -e "install.packages('IRkernel')"
+    R -e "install.packages('plotly')"
+    R -e "install.packages('shiny')"
+
+    # Install the IRkernel spec for Jupyter
+    R -e "IRkernel::installspec(user = TRUE)"
+
+    # Finally install ProFound
+    R -e "remotes::install_github('asgr/ProFound', dependencies=TRUE)"
+
+    # Install Rmpi for optional MPI in R
+    R -e "install.packages('Rmpi', type='source')"
+
+%runscript
+    echo "Use 'apptainer exec profound-v1.34.2.sif R'
+    exec "$@"
+
+%help
+    This container includes:
+    - R version 4.1.2
+    - ProFound and its dependencies with Jupyterlab support 
+    - Optional MPI via Rmpi
+    - X11 support for interactive plots (use ssh -X or ssh -Y)
+    - Thread controls compatible with SLURM (OMP_NUM_THREADS)
+    
+    Usage examples:
+    
+    1. Run R interactively:
+       apptainer exec profound-v1.34.2.sif R
+
+    2. Run ProFound on a FITS image:
+       library(ProFound)
+       image <- profoundReadFITS("my_image.fits")
+       result <- profoundProFound(image$imDat)
+
+    3. Use SLURM arrays to process multiple FITS images:
+       export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+       srun apptainer exec profound-v1.34.2.sif Rscript process.R <fitsfile>
+ 
+    To run R and hence ProFound in a jupyter-notebook, run the following:
+    1. apptainer exec -B $HOME:$HOME profound-v1.34.2.sif \ 
+       		 jupyter notebook --no-browser --ip=127.0.0.1 --port=8888
+       Note the long string after `token=` displayed in ther terminal as it 
+       is the token needed to authenticate you when prompted in the browser.
+    2. ssh -L 8888:localhost:8888 azimuth@<ip address>
+    3. In your browser, open http://localhost:8888 and paste the token into
+       the login box. 
+    4. Start a `New` session with all features in the ProFound container
+
