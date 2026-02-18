@@ -24,15 +24,15 @@ From: ubuntu:22.04
 
     apt-get update && apt-get install -y \
         git \
-	wget \
+	    wget \
         build-essential \
         gfortran \
-	g++ \
+	    g++ \
         python3-setuptools \
-	python3-pip \
+	    python3-pip \
         libblas-dev \
         liblapack-dev \
-	libboost-python-dev \
+	    libboost-python-dev \
         libcfitsio-dev \
         wcslib-dev
 

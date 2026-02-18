@@ -108,15 +108,6 @@ From: ubuntu:24.04
     exec "$@"
 
 %help
-    MPI-enabled SoFiA-2 container with HDF5 support.
-    BusyFit, sofia-gui, SoFiA-image-pipeline,
-    deblend_sofia_detections, optifind, and SpecPlot
-    are provided too.
-
-    Use host MPI via:
-        mpirun apptainer exec sofia.sif sofia
-
-    Works with:
-        srun
-        mpirun
-        mpiexec
+    The AOFlagger flagging suite. Provides access to
+    the rfigui, aoqplot, aoquality tools. AOFlagger
+    can be used from within an iPython shell.
