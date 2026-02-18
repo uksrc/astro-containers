@@ -1,0 +1,80 @@
+Bootstrap: docker
+From: ubuntu:22.04
+
+%labels
+    APPLICATION_NAME Ubuntu LTS + Tricolour 
+    APPLICATION_VERSION 0.2
+    OS_VERSION Ubuntu 22.04
+    APPLICATION_URL https://github.com/ratt-ru/tricolour
+
+    SYSTEM_NAME slurm.cam.uksrc.org
+    SYSTEM_APPTAINER_VERSION 1.4.5
+    SYSTEM_URL https://www.uksrc.org
+    
+    AUTHOR_NAME Johannes Allotey 
+    AUTHOR_EMAIL uksrc-support@manchester.ac.uk
+
+%environment
+    export DEBIAN_FRONTEND=noninteractive
+    export PIP_ROOT_USER_ACTION=ignore
+    export PATH=/opt/miniconda/bin:$PATH
+
+%post
+    set -e
+
+    apt-get update && apt-get install -y \
+        git \
+	wget \
+        build-essential \
+        gfortran \
+	g++ \
+        python3-setuptools \
+	python3-pip \
+        libblas-dev \
+        liblapack-dev \
+	libboost-python-dev \
+        libcfitsio-dev \
+        wcslib-dev
+
+    # Install Miniconda (Python 3.11)
+    mkdir -p /opt/conda
+    wget -q https://repo.anaconda.com/miniconda/Miniconda3-py311_25.9.1-1-Linux-x86_64.sh -O /opt/conda/miniconda.sh
+    /bin/bash /opt/conda/miniconda.sh -b -p /opt/miniconda
+    rm /opt/conda/miniconda.sh
+
+    # Activate conda for this build step
+    export PATH=/opt/miniconda/bin:$PATH
+
+    # Upgrade pip
+    pip install --upgrade pip wheel setuptools
+
+    # Install required Python packages
+    pip install \
+    	ipython \
+    	"dask[array]" \
+    	"dask-ms[xarray]" \
+    	zarr \
+    	donfig \
+    	threadpoolctl \
+    	python-casacore \
+    	cython \
+    	gil
+
+    # Clone and install tricolour
+    git clone --recurse-submodules https://github.com/ratt-ru/tricolour.git
+    cd tricolour
+    pip install .
+
+    # Optional cleanup to reduce size
+    apt-get autoremove -y
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+
+%runscript
+    exec "$@"
+
+%help
+    Use tricolour --help for the command line options
+    to the flagger. Alternatively, `import tricolour`
+    from an ipython shell
+  
