@@ -8,6 +8,7 @@ Apptainer/Singularity definition files for radio astronomy software images publi
 - `casa-modular/casa-modular-v6.7.0.def` – CASA 6 modular build (pip-based).
 - `casa-standalone/casa-standalone-v6.7.2.def` – CASA 6.7.2 standalone bundle with bundled GUIs unpacked.
 - `casacore/casacore-v3.7.1.def` – Casacore libraries built from source.
+- `karabo-pipeline/karabo-pipeline-v0.34.def` – The SKA Digital Twin Pipeline. 
 - `miriad/miriad-v2025.10.14.def` – MIRIAD prebuilt binaries with environment setup.
 - `nuradio/nuradio-v3.1.def` – NuRadioMC + NuRadioReco + RadioPropa simulation package.
 - `profound/profound-v1.34.2.def` - ProFound source finder. 
