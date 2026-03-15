@@ -1,0 +1,187 @@
+Bootstrap: docker
+From: nvidia/cuda:12.9.1-runtime-ubuntu22.04
+
+%labels
+    APPLICATION_NAME Ubuntu LTS + Karabo-Pipeline 
+    APPLICATION_VERSION 0.34.0
+    OS_VERSION Ubuntu 24.04
+    APPLICATION_URL https://github.com/i4Ds/Karabo-Pipeline
+    
+    SYSTEM_NAME slurm.cam.uksrc.org
+    SYSTEM_APPTAINER_VERSION 1.4.5
+    SYSTEM_URL https://www.uksrc.org
+
+    AUTHOR_NAME Johannes Allotey
+    AUTHOR_EMAIL uksrc-support@manchester.ac.uk
+
+%environment
+    export CUDA_HOME=/usr/local/cuda
+    export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+    export PATH=/opt/miniconda/envs/karabo_env/bin:/opt/miniconda/bin:$PATH
+    export LD_LIBRARY_PATH=/opt/miniconda/envs/karabo_env/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+ 
+    # MIRTO
+    export PYTHONPATH=/extras:$PYTHONPATH
+
+    # OSKAR telescope models path
+    export OSKAR_TELESCOPE_DIR=/data/oskar_telescope_models
+
+    export OPENBLAS_NUM_THREADS=1
+    export MKL_NUM_THREADS=1
+    export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
+
+%post
+    set -e
+    
+    # System packages
+    apt-get update && apt-get install -y --no-install-recommends \
+        wget \
+        git \
+        build-essential \
+        bzip2 \
+        ca-certificates \
+        curl \
+        gnupg \
+        libglib2.0-0 \
+        libxext6 \
+        libsm6 \
+        libxrender1 \
+        libssl-dev \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Install Miniconda (Python 3.9)
+    mkdir -p /opt/conda
+    wget -q https://repo.anaconda.com/miniconda/Miniconda3-py39_25.9.1-1-Linux-x86_64.sh -O /opt/conda/miniconda.sh
+    /bin/bash /opt/conda/miniconda.sh -b -p /opt/miniconda
+    rm /opt/conda/miniconda.sh
+    export PATH=/opt/miniconda/bin:$PATH
+
+    # Configure Conda channels
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+    
+    conda config --system --add channels conda-forge
+    conda config --system --add channels i4ds
+    conda config --system --add channels nvidia/label/cuda-11.7.0
+    conda config --system --set channel_priority flexible # setting to strict leads to issues with installing bluebild.
+
+    # Create minimal base environment
+    conda create -y -n karabo_env python=3.9 pip
+
+    # CUDA Layer
+    conda install -y -n karabo_env \
+        cuda-version=11.7 \
+        cuda-cudart=11.7 \
+        libcufft \
+	-c nvidia/label/cuda-11.7.0 -c conda-forge 
+
+    # MPI Layer
+    conda install -y -n karabo_env \
+    	  mpich \
+    	  mpi4py \
+    	  "h5py=*=mpi_mpich*" \
+    	  "fftw=*=mpi_mpich*" \
+    	  -c conda-forge
+
+    # Dask Layer
+    conda install -y -n karabo_env \
+        dask=2022.12.1 \
+        dask-mpi \
+        distributed \
+	-c conda-forge 
+
+    # Core numerical stack
+    conda install -y -n karabo_env \
+        "numpy>=1.21,!=1.24.0,<2.0" \
+        "scipy>=1.10.1,<1.14" \
+        pandas \
+        psutil \
+        packaging \
+        "xarray>=2022.11" \
+        matplotlib \
+        ipython \
+        nbformat \
+        nbconvert \
+	-c conda-forge
+
+    # SKA / Imaging Stack 
+    conda install -y -n karabo_env \
+        aratmospy=1.0.0 \
+	bluebild=0.1.0 \
+        bdsf=1.10.2 \
+        eidos=1.1.0 \
+        katbeam=0.1.0 \
+        oskarpy=2.8.3 \
+        rascil=1.0.0 \
+        ska-gridder-nifty-cuda=0.3.0 \
+        ska-sdp-datamodels=0.1.3 \
+        ska-sdp-func-python=0.1.4 \
+        tools21cm=2.0.3 \
+        wsclean \
+	-c conda-forge -c i4ds -c nvidia/label/cuda-11.7.0
+
+    # Astronomy Core
+    conda install -y -n karabo_env \
+        astropy=5.1.1 \
+        healpy \
+        casacore \
+        montagepy=6.0.0 \
+        "reproject>=0.9,<=10.0" \
+	-c conda-forge -c i4ds -c nvidia/label/cuda-11.7.0
+
+    # Utilities
+    conda install -y -n karabo_env \
+        requests \
+        "rfc3986>=2.0.0" \
+        "setuptools>=69.0.0,<70.0.0" \
+	-c conda-forge
+
+    # Pip extras (conda does not support [casa])
+    conda run -n karabo_env pip install "pyuvdata[casa]>=2.4,<3"
+
+    # Packages for MIRTO that are not already installed  
+    conda run -n karabo_env pip install dask-ms	
+    conda run -n karabo_env pip install cupy-cuda12x
+    conda run -n karabo_env pip install cufinufft    
+
+    # Install Karabo Pipeline
+    git clone --recurse-submodules https://github.com/i4Ds/Karabo-Pipeline.git
+    cd Karabo-Pipeline
+    conda run -n karabo_env python -m pip install .
+    
+    cd /
+    mkdir -p /data/oskar_telescope_models/
+    cp -r Karabo-Pipeline/karabo/data/*.tm /data/oskar_telescope_models/
+    rm -rf Karabo-Pipeline
+
+    # MIRTO uses the karabo-pipeline so let us add MIRTO here 
+    mkdir -p /extras/
+    git clone --recurse-submodules https://github.com/micbia/mirto.git /extras/mirto
+    cd /extras/mirto
+
+    # Remove developer specific paths
+    sed -i 's/from gain.iono.new_atmospy import NewArScreens/from new_atmospy import NewArScreens/' atmos_effect/create_screen.py
+    sed -i 's|sys.path.append("/users/mibianco/codes/sdc3")|# sys.path.append("/users/mibianco/codes/sdc3")|' atmos_effect/create_screen.py
+    cd /
+
+    # Clean up
+    conda clean -afy
+    apt autoclean    
+    rm -rf /root/.cache/pip
+
+%runscript
+    # Default command when container runs
+    exec bash
+
+%help
+  The Karabo-Pipeline, a starting point for the SKA Digital Twin Pipeline.
+  
+  For interactive use with GPU support, launch a shell with the command:
+  ```
+  apptainer shell --nv <image.sif>
+  ```
+
+  Refer to the Karabo-Pipeline documentation for information on how to 
+  use the MPI functionality.
+
+
