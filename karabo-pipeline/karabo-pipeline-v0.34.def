@@ -2,9 +2,9 @@ Bootstrap: docker
 From: nvidia/cuda:12.9.1-runtime-ubuntu22.04
 
 %labels
-    APPLICATION_NAME Ubuntu LTS + Karabo-Pipeline 
+    APPLICATION_NAME Ubuntu LTS + Karabo-Pipeline + MIRTO 
     APPLICATION_VERSION 0.34.0
-    OS_VERSION Ubuntu 24.04
+    OS_VERSION Ubuntu 22.04
     APPLICATION_URL https://github.com/i4Ds/Karabo-Pipeline
     
     SYSTEM_NAME slurm.cam.uksrc.org
