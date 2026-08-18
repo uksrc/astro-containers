@@ -1,0 +1,221 @@
+Bootstrap: docker
+From: ubuntu:24.04
+
+%labels
+    APPLICATION_NAME Ubuntu LTS + DDFacet
+    APPLICATION_VERSION 1.0.0.0
+    OS_VERSION Ubuntu 24.04
+    APPLICATION_URL https://github.com/saopicc/DDFacet
+
+    SYSTEM_NAME slurm.cam.uksrc.org
+    SYSTEM_APPTAINER_VERSION 1.4.5
+    SYSTEM_URL https://www.uksrc.org
+
+    AUTHOR_NAME Jack Radcliffe
+    AUTHOR_EMAIL uksrc-support@manchester.ac.uk
+
+%environment
+    export LC_ALL=C
+    export DEBIAN_FRONTEND=noninteractive
+    export DDFACET_TEST_DATA_DIR=/test_data
+    export DDFACET_TEST_OUTPUT_DIR=/test_output
+
+    export PATH=/opt/venv/bin:$PATH
+    export LD_LIBRARY_PATH=/opt/venv/lib:$LD_LIBRARY_PATH
+    export PYTHONPATH=/opt/venv/lib/python3.12/site-packages
+
+%post
+    set -e
+    export DEBIAN_FRONTEND=noninteractive
+    export DEBIAN_PRIORITY=critical
+    export GNUCOMPILER=11
+    export PYTHONVER=3.12
+    export NUMPYVER=2.3.2
+    export DDFACET_REF=v1.0.0.0
+
+    echo "*        -   memlock     unlimited" >> /etc/security/limits.conf
+
+    ##############################################################################
+    # OS package dependencies (mirrors upstream docker.2404 recipe)
+    apt-get update
+    apt-get install -y \
+        dpkg-dev g++-$GNUCOMPILER gcc-$GNUCOMPILER libc-dev cmake \
+        gfortran-$GNUCOMPILER git wget subversion rsync ca-certificates \
+        python3-virtualenv python3-pip libfftw3-dev python3-numpy \
+        libfreetype6 libfreetype6-dev libfreetype-dev libpng-dev pkg-config \
+        python3-dev libboost-all-dev libcfitsio-dev libhdf5-dev wcslib-dev \
+        libatlas-base-dev liblapack-dev python3-tk libreadline6-dev \
+        liblog4cplus-dev libncurses5-dev libtinfo6 libncurses-dev \
+        flex bison libbison-dev libqdbm-dev libgsl-dev make \
+        casacore-data python3-casacore casacore-dev casacore-tools
+
+    update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-$GNUCOMPILER 100 \
+        --slave /usr/bin/gcc gcc /usr/bin/gcc-$GNUCOMPILER \
+        --slave /usr/bin/x86_64-linux-gnu-gcc x86_64-linux-gnu-gcc /usr/bin/gcc-$GNUCOMPILER
+    update-alternatives --install /usr/bin/x86_64-linux-gnu-g++ x86_64-linux-gnu-g++ /usr/bin/g++-$GNUCOMPILER 100 \
+        --slave /usr/bin/g++ g++ /usr/bin/g++-$GNUCOMPILER \
+        --slave /usr/bin/x86_64-linux-gnu-cpp x86_64-linux-gnu-cpp /usr/bin/g++-$GNUCOMPILER
+    update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-$GNUCOMPILER 100 \
+        --slave /usr/bin/x86_64-linux-gnu-gfortran x86_64-linux-gnu-gfortran /usr/bin/gfortran-$GNUCOMPILER
+
+    ##############################################################################
+    # All python dependencies go into a venv
+    mkdir -p /opt
+    cd /opt
+    virtualenv venv -p python${PYTHONVER}
+    . /opt/venv/bin/activate
+    python -m pip install -U pip setuptools wheel
+
+    ##############################################################################
+    # Build SOFA from source
+    cd /opt
+    wget https://www.iausofa.org/s/sofa_c-20231011tar.gz
+    tar xzf sofa_c-20231011tar.gz
+    rm sofa_c-20231011tar.gz
+    cd /opt/sofa/20231011/c/src
+    sed -i '52s#.*#INSTALL_DIR = /usr#' makefile
+    make -j$(nproc)
+    make install
+    make test
+    cd /opt
+    rm -rf /opt/sofa
+
+    ##############################################################################
+    # Build blitz from source
+    cd /opt
+    wget https://github.com/blitzpp/blitz/archive/1.0.2.tar.gz
+    tar -xf 1.0.2.tar.gz
+    rm 1.0.2.tar.gz
+    cd /opt/blitz-1.0.2
+    grep -rl python . | xargs sed -i "s/python/python${PYTHONVER}/g"
+    autoreconf --force --install
+    ./configure --enable-shared
+    make -j$(nproc)
+    make install
+    ldconfig
+    cd /opt
+    rm -rf /opt/blitz-1.0.2
+
+    ##############################################################################
+    # Build casarest from source, then python-casacore into the venv
+    cd /opt
+    wget https://github.com/casacore/casarest/archive/v1.8.1.tar.gz
+    tar xf v1.8.1.tar.gz
+    rm v1.8.1.tar.gz
+    mkdir -p /opt/casarest-1.8.1/build
+    cd /opt/casarest-1.8.1/build
+    cmake -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release ..
+    make -j$(nproc)
+    make install
+    ldconfig
+    cd /opt
+    rm -rf /opt/casarest-1.8.1
+
+    . /opt/venv/bin/activate
+    python -m pip install --use-pep517 python-casacore==3.7.1 "numpy==${NUMPYVER}"
+    python -c "from pyrap.tables import table as tbl"
+
+    ##############################################################################
+    # Build makems from source and smoke-test it
+    cd /opt
+    wget https://github.com/ska-sa/makems/archive/v1.5.6.tar.gz
+    tar xf v1.5.6.tar.gz
+    rm v1.5.6.tar.gz
+    mkdir -p /opt/makems-1.5.6/LOFAR/build/gnu_opt
+    cd /opt/makems-1.5.6/LOFAR/build/gnu_opt
+    cmake -DCMAKE_MODULE_PATH:PATH=/opt/makems-1.5.6/LOFAR/CMake \
+          -DUSE_LOG4CPLUS=OFF -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX=/usr ../..
+    make -j$(nproc)
+    make install
+    cd /opt/makems-1.5.6/test
+    makems WSRT_makems.cfg
+    cd /opt
+    rm -rf /opt/makems-1.5.6
+
+    ##############################################################################
+    # MeqTrees universe: python packages + timba built from source
+    . /opt/venv/bin/activate
+    python -m pip install \
+        purr \
+        'owlcat>=1.8.1rc1' \
+        kittens \
+        'meqtrees-cattery>=1.8.0rc3' \
+        astro-tigger-lsm \
+        "numpy==${NUMPYVER}"
+
+    cd /opt
+    wget https://github.com/ska-sa/meqtrees-timba/archive/refs/tags/v1.11.tar.gz
+    tar zxf v1.11.tar.gz
+    rm v1.11.tar.gz
+    cd meqtrees-timba-1.11
+    mkdir build
+    cd build
+    cmake -DCMAKE_INSTALL_PREFIX=/usr \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DENABLE_PYTHON_3=ON \
+          -DPYTHON_PACKAGES_DIR=/opt/venv/lib/python${PYTHONVER}/site-packages \
+          ..
+    make -j$(nproc)
+    make install
+    ldconfig
+    cd /opt
+    rm -rf /opt/meqtrees-timba-1.11
+
+    ##############################################################################
+    # Build LOFARBeam from source
+    cd /opt
+    wget https://github.com/bennahugo/LOFARBeam/archive/refs/tags/DDF_KMS_22.04.tar.gz
+    tar zxf DDF_KMS_22.04.tar.gz
+    rm DDF_KMS_22.04.tar.gz
+    cd LOFARBeam-DDF_KMS_22.04
+    mkdir -p build/gnucxx11_opt
+    cd build/gnucxx11_opt
+    cmake -DCMAKE_INSTALL_PREFIX=/usr \
+          -DPYTHON_PACKAGES_DIR=/opt/venv/lib/python${PYTHONVER}/site-packages \
+          ../..
+    make -j$(nproc)
+    make install
+    . /opt/venv/bin/activate
+    python -c "import lofar.stationresponse as lsr"
+    cd /opt
+    rm -rf /opt/LOFARBeam-DDF_KMS_22.04
+
+    ##############################################################################
+    # Clone and install DDFacet itself
+    cd /opt
+    git clone --recursive --branch ${DDFACET_REF} https://github.com/saopicc/DDFacet.git
+    cd /opt/DDFacet
+    rm -rf DDFacet/cbuild
+
+    # workaround for a pip build-isolation bug pulling a higher tensorflow that
+    # is not ABI compatible with the montblanc dft-support extra
+    echo "tensorflow==2.19.0" > /opt/DDFacet/constraints.txt
+    export PIP_CONSTRAINT=/opt/DDFacet/constraints.txt
+
+    . /opt/venv/bin/activate
+    python -m pip install --use-pep517 "/opt/DDFacet[testing-requirements,fits-beam-support,kms-support,alternate-data-backends,dft-support]"
+
+    # sanity-check optional backends
+    python -c "import montblanc"
+    python -c "import bdsf"
+
+    ##############################################################################
+    # Cleanup
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+
+%test
+    . /opt/venv/bin/activate
+    DDF.py --help
+    MakeMask.py --help
+    MakeCatalog.py --help
+    MakeModel.py --help
+    MaskDicoModel.py --help
+    ClusterCat.py --help
+
+%runscript
+    exec DDF.py "$@"
+
+%apprun ddfacet
+    exec DDF.py "$@"

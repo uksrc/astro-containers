@@ -1,0 +1,376 @@
+# wsclean-gpu.def
+#
+# Apptainer/Singularity recipe for WSClean built with:
+#   - IDG (Image Domain Gridder) compiled with CUDA support -> GPU imaging
+#   - EveryBeam                                              -> primary-beam models
+#   - Casacore (built from source, C++20-capable, newer than Ubuntu's package)
+#   - optional AOFlagger (off by default, see --build-arg WITH_AOFLAGGER=1)
+#
+# Verified against upstream sources on 2026-08-12:
+#   casacore   v3.8.1   https://github.com/casacore/casacore
+#   idg        1.3.0    https://git.astron.nl/RD/idg
+#   EveryBeam  v0.8.3   https://git.astron.nl/RD/EveryBeam
+#   wsclean    v3.7     https://gitlab.com/aroffringa/wsclean
+# Package lists and CUDA cmake flags are taken from ASTRON's own CI docker
+# recipes (docker/ubuntu_22_04_{base,gpu,integration} in each repo) so this
+# should track what upstream actually tests against.
+#
+# Default CUDA_ARCH=80 matches the A100-SXM4-80GB GPUs on this cluster's
+# `a100_gpu` partition (checked via `sinfo`/`scontrol show nodes`: driver
+# 595.71.05, CUDA 13.2 -- comfortably forward-compatible with the CUDA 12.6
+# toolkit used to build this image).
+#
+# Build (defaults are fine on this cluster):
+#   apptainer build wsclean-gpu.sif wsclean-gpu.def
+#
+# Build for a different GPU (e.g. a V100 = sm_70, H100 = sm_90):
+#   apptainer build --build-arg CUDA_ARCH=70 wsclean-gpu.sif wsclean-gpu.def
+#
+# Run (MUST pass --nv to expose the driver/GPU, and must run on a GPU node,
+# e.g. via `srun -p a100_gpu --gres=gpu:1 ...`):
+#   apptainer exec --nv wsclean-gpu.sif wsclean -use-idg -idg-mode hybrid ...
+#
+# NOTE ON BUILDING ON THIS CLUSTER: `apptainer build` needs root/fakeroot and
+# compiles CUDA host code (nvcc) but does NOT need a GPU present at build
+# time (CMAKE_CUDA_ARCHITECTURES is set explicitly below, so no GPU
+# autodetection is required). It is fine to build on a login/standard node;
+# you do not need to build on the a100_gpu partition. You DO need --nv and a
+# GPU allocation at *run* time to actually use -use-idg with a CUDA proxy.
+
+Bootstrap: docker
+From: nvidia/cuda:{{ NVIDIA_BASE }}-devel-ubuntu22.04
+
+%arguments
+    NVIDIA_BASE=12.6.2
+    CUDA_ARCH=80
+    CASACORE_VERSION=v3.8.1
+    IDG_VERSION=1.3.0
+    EVERYBEAM_VERSION=v0.8.3
+    WSCLEAN_VERSION=v3.7
+    AOFLAGGER_VERSION=v3.4.0
+    WITH_AOFLAGGER=0
+    DOWNLOAD_LOBES=OFF
+    DOWNLOAD_LWA=OFF
+    # ON by default: this cluster is CPU-heterogeneous (the build runs on
+    # standard-0's Intel Xeon, but the a100_gpu nodes are AMD EPYC 7763 --
+    # no AVX-512). Without PORTABLE=ON, wsclean/idg/EveryBeam build with
+    # -march=native for whatever CPU happened to build them and SIGILL on
+    # anything else. Only set this to OFF if you know the .sif will only
+    # ever run on nodes matching the build node's exact CPU.
+    PORTABLE=ON
+
+%labels
+    Author jack.f.radcliffe@gmail.com
+    Application wsclean-gpu
+    wsclean.version {{ WSCLEAN_VERSION }}
+    idg.version {{ IDG_VERSION }}
+    everybeam.version {{ EVERYBEAM_VERSION }}
+    casacore.version {{ CASACORE_VERSION }}
+    cuda.arch {{ CUDA_ARCH }}
+    portable {{ PORTABLE }}
+
+%help
+    WSClean (GPU/IDG-CUDA gridder + EveryBeam primary-beam support), built on
+    top of nvidia/cuda:{{ NVIDIA_BASE }}-devel-ubuntu22.04.
+
+    Components:
+      casacore   {{ CASACORE_VERSION }}
+      idg        {{ IDG_VERSION }}  (BUILD_LIB_CPU + BUILD_LIB_CUDA, sm_{{ CUDA_ARCH }})
+      EveryBeam  {{ EVERYBEAM_VERSION }}
+      wsclean    {{ WSCLEAN_VERSION }}
+
+    Usage:
+      apptainer exec --nv wsclean-gpu.sif wsclean --version
+      apptainer exec --nv wsclean-gpu.sif wsclean -use-idg -idg-mode hybrid \
+          -apply-primary-beam -name out -size 4096 4096 -scale 1asec ... my.ms
+
+      --nv is required at run time to bind the host driver/GPU libraries,
+      and the job must land on a GPU node (this cluster: `-p a100_gpu
+      --gres=gpu:N`). Without --nv, IDG still works fine on CPU
+      (-idg-mode cpu), just without acceleration.
+
+      Built with PORTABLE={{ PORTABLE }} (wsclean/idg/EveryBeam's own flag
+      for "don't use -march=native"). Keep this ON on clusters with mixed
+      CPU nodes -- this one builds on Intel Xeon (standard-*) but the GPU
+      nodes (a100_gpu) are AMD EPYC, and a non-portable build SIGILLs
+      immediately on that mismatch.
+
+    If EveryBeam can't find its coefficient data at runtime, point it at the
+    baked-in copy explicitly:
+      export EVERYBEAM_DATADIR=/usr/local/share/everybeam
+
+    LOFAR LOBES / OVRO-LWA beam coefficients are NOT bundled by default
+    (large downloads, irrelevant for e.g. VLA data). Rebuild with
+    --build-arg DOWNLOAD_LOBES=ON and/or --build-arg DOWNLOAD_LWA=ON if
+    you need them.
+
+    AOFlagger is not included by default. Rebuild with
+    --build-arg WITH_AOFLAGGER=1 to add it.
+
+%post
+    # Apptainer always runs this section via `sh scriptfile` (a shebang line
+    # here would be inert), so stick to POSIX sh -- no `set -o pipefail`.
+    # (Not needed for correctness: the wsclean cmake-configure pipe below is
+    # checked by grepping the tee'd log file afterwards, not the pipe's exit
+    # status.)
+    set -eu
+    export DEBIAN_FRONTEND=noninteractive
+
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        bison \
+        build-essential \
+        ca-certificates \
+        cmake \
+        file \
+        flex \
+        gfortran \
+        git \
+        libarmadillo-dev \
+        libblas-dev \
+        libboost-all-dev \
+        libcfitsio-dev \
+        libfftw3-dev \
+        libgsl-dev \
+        libgtkmm-3.0-dev \
+        libhdf5-dev \
+        liblapack-dev \
+        liblapacke-dev \
+        liblua5.3-dev \
+        libncurses-dev \
+        libpng-dev \
+        libreadline-dev \
+        libxml2-dev \
+        ninja-build \
+        patchelf \
+        pkg-config \
+        pybind11-dev \
+        python3-dev \
+        python3-numpy \
+        python3-pip \
+        wcslib-dev \
+        wget
+
+    # Ubuntu 22.04's packaged cmake is 3.22.1, but wsclean v3.7 requires
+    # >=3.23 (casacore/idg/EveryBeam are fine with 3.22.1, so this only
+    # bites at the very last build step). Get a current one from PyPI
+    # instead -- it installs to /usr/local/bin, which precedes /usr/bin
+    # on $PATH, so it transparently shadows the apt one.
+    pip3 install --no-cache-dir --upgrade "cmake>=3.28"
+    cmake --version
+
+    # Make sure /usr/local/lib{,64} are registered with the dynamic linker
+    # *before* anything is installed there, so each `cmake --install` step
+    # below is immediately visible to the next one.
+    echo "/usr/local/lib" > /etc/ld.so.conf.d/local.conf
+    echo "/usr/local/lib64" >> /etc/ld.so.conf.d/local.conf
+    ldconfig
+
+    mkdir -p /opt/src
+    NPROC="$(nproc)"
+
+    # --- Casacore measures data (WSRT_Measures) -----------------------
+    # The file on the server is updated ~daily; ignore/regenerate on leap
+    # second warnings.
+    mkdir -p /usr/share/casacore/data
+    cd /usr/share/casacore/data
+    wget -nv https://www.astron.nl/iers/WSRT_Measures.ztar
+    tar xfz WSRT_Measures.ztar
+    rm WSRT_Measures.ztar
+
+    # --- Casacore -------------------------------------------------------
+    # Ubuntu 22.04's packaged casacore is too old (no C++20) for
+    # EveryBeam/WSClean, so build from source.
+    # BUILD_SISCO=OFF: casacore's optional Sisco compression storage manager
+    # hard-requires libdeflate>=1.19 (find_package(LibDeflate 1.19 REQUIRED)),
+    # but Ubuntu 22.04 only ships libdeflate 1.10. SISCO isn't needed by
+    # wsclean/EveryBeam, so just skip it rather than build libdeflate from
+    # source.
+    git clone --branch "{{ CASACORE_VERSION }}" --depth 1 \
+        https://github.com/casacore/casacore.git /opt/src/casacore
+    cmake -S /opt/src/casacore -B /opt/src/casacore/build -G Ninja \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_PYTHON=OFF \
+        -DBUILD_PYTHON3=OFF \
+        -DBUILD_TESTING=OFF \
+        -DUSE_OPENMP=ON \
+        -DUSE_HDF5=ON \
+        -DDATA_DIR=/usr/share/casacore/data \
+        -DBUILD_SISCO=OFF
+    cmake --build /opt/src/casacore/build --parallel "${NPROC}"
+    cmake --install /opt/src/casacore/build
+    ldconfig
+    rm -rf /opt/src/casacore
+
+    # --- AOFlagger (optional) -------------------------------------------
+    if [ "{{ WITH_AOFLAGGER }}" = "1" ]; then
+        git clone --recurse-submodules --branch "{{ AOFLAGGER_VERSION }}" \
+            https://gitlab.com/aroffringa/aoflagger.git /opt/src/aoflagger
+        cmake -S /opt/src/aoflagger -B /opt/src/aoflagger/build -G Ninja \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF
+        cmake --build /opt/src/aoflagger/build --parallel "${NPROC}"
+        cmake --install /opt/src/aoflagger/build
+        ldconfig
+        rm -rf /opt/src/aoflagger
+    fi
+
+    # --- IDG (Image Domain Gridder), CPU + CUDA gridders -----------------
+    # Full (non-shallow) clone: IDG's cmake uses `git describe` to stamp its
+    # own version, which needs history, not just the tagged commit.
+    #
+    # CMAKE_LIBRARY_PATH points at cuda/compat (a real, driver-version-
+    # pinned libcuda.so.<ver>, meant for running on a host with an *older*
+    # driver than the toolkit expects) rather than cuda/lib64/stubs (the
+    # toolkit's linker-only placeholder). Pointing cudawrappers' find_package
+    # (CUDAToolkit)-based CUDA::cuda_driver at lib64/stubs instead produced
+    # "undefined reference to cuMemGetInfo_v2" etc at link time for
+    # libidg-cuda.so even though the stub does export those symbols --
+    # not fully root-caused, not worth chasing further when compat is known
+    # to link cleanly. The tradeoff: linking against compat/ bakes its path
+    # into libidg-cuda.so's RUNPATH, which would shadow the real host driver
+    # `--nv` binds in at run time ("unsupported display driver / cuda
+    # driver combination" even though the host driver, 595.71/CUDA 13.2, is
+    # actually fine and newer than the 12.6 toolkit -- pure --nv forward
+    # compatibility, no compat shim needed at runtime at all) -- so the
+    # compat path is patched back out of the installed .so's RUNPATH below
+    # with patchelf, right after `cmake --install`.
+    git clone --recurse-submodules --branch "{{ IDG_VERSION }}" \
+        https://git.astron.nl/RD/idg.git /opt/src/idg
+    cmake -S /opt/src/idg -B /opt/src/idg/build -G Ninja \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_LIB_CPU=ON \
+        -DBUILD_LIB_CUDA=ON \
+        -DCMAKE_CUDA_ARCHITECTURES="{{ CUDA_ARCH }}" \
+        -DCMAKE_LIBRARY_PATH="/usr/local/cuda/compat;/usr/local/cuda/lib64" \
+        -DCMAKE_CXX_FLAGS="-isystem /usr/local/cuda/include" \
+        -DBUILD_TESTING=OFF \
+        -DBUILD_PACKAGES=OFF \
+        -DBUILD_WITH_PYTHON=OFF \
+        -DPORTABLE={{ PORTABLE }}
+    cmake --build /opt/src/idg/build --parallel "${NPROC}"
+    cmake --install /opt/src/idg/build
+    # NB: do NOT patchelf the compat/ RUNPATH out of libidg-cuda.so here yet
+    # -- wsclean's own build below links against it too, transitively, and
+    # this build node has no real driver at all, so that later link step
+    # needs *some* resolvable libcuda.so.1 just as much as this one did.
+    # The RUNPATH gets cleaned up once, right at the end, after nothing else
+    # is going to link against it anymore -- see the patchelf call after the
+    # wsclean build below.
+    ldconfig
+    rm -rf /opt/src/idg
+
+    # --- EveryBeam --------------------------------------------------------
+    git clone --recurse-submodules --branch "{{ EVERYBEAM_VERSION }}" \
+        https://git.astron.nl/RD/EveryBeam.git /opt/src/everybeam
+    cmake -S /opt/src/everybeam -B /opt/src/everybeam/build -G Ninja \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_PREFIX_PATH=/usr/local \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_TESTING=OFF \
+        -DBUILD_WITH_PYTHON=ON \
+        -DDOWNLOAD_LOBES={{ DOWNLOAD_LOBES }} \
+        -DDOWNLOAD_LWA={{ DOWNLOAD_LWA }} \
+        -DPORTABLE={{ PORTABLE }}
+    cmake --build /opt/src/everybeam/build --parallel "${NPROC}"
+    cmake --install /opt/src/everybeam/build
+    ldconfig
+    rm -rf /opt/src/everybeam
+
+    # --- WSClean ------------------------------------------------------
+    git clone --recurse-submodules --branch "{{ WSCLEAN_VERSION }}" \
+        https://gitlab.com/aroffringa/wsclean.git /opt/src/wsclean
+    cmake -S /opt/src/wsclean -B /opt/src/wsclean/build -G Ninja \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_PREFIX_PATH=/usr/local \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_TESTING=OFF \
+        -DPORTABLE={{ PORTABLE }} \
+        2>&1 | tee /tmp/wsclean_configure.log
+
+    # Hard-fail the build if IDG or EveryBeam did not actually get picked
+    # up by wsclean's cmake configure -- better than silently shipping a
+    # CPU-only / no-beam wsclean binary.
+    grep -q "Image domain gridder libraries found" /tmp/wsclean_configure.log \
+        || { echo "FATAL: WSClean did not detect IDG -- GPU gridder missing." >&2; exit 1; }
+    grep -q "EveryBeam library found" /tmp/wsclean_configure.log \
+        || { echo "FATAL: WSClean did not detect EveryBeam." >&2; exit 1; }
+
+    cmake --build /opt/src/wsclean/build --parallel "${NPROC}"
+    cmake --install /opt/src/wsclean/build
+    ldconfig
+    rm -rf /opt/src/wsclean /tmp/wsclean_configure.log
+
+    # Now that nothing else in this build will link against libidg-cuda.so,
+    # strip the compat/ (and dangling build-tree) RUNPATH entries baked in
+    # when IDG was built above. Left in place, compat/'s driver-version-
+    # pinned libcuda.so.1 would shadow the real host driver `--nv` binds in
+    # at run time and produce "unsupported display driver / cuda driver
+    # combination" even though the host driver is actually fine (this
+    # cluster: 595.71/CUDA 13.2, newer than the 12.6 toolkit -- pure --nv
+    # forward compatibility, no compat shim needed at runtime at all).
+    # Leaves it able to find its own installed dependencies (/usr/local/lib)
+    # and the toolkit's own runtime libs (cuda/lib64, e.g. libcufft/
+    # libnvrtc, which are NOT driver-version-sensitive the way libcuda.so
+    # is) -- just not compat/.
+    patchelf --set-rpath "/usr/local/lib:/usr/local/cuda/lib64" \
+        /usr/local/lib/libidg-cuda.so
+    ldconfig
+
+    # --- Cleanup ----------------------------------------------------------
+    apt-get clean
+    rm -rf /var/lib/apt/lists/* /opt/src
+
+%environment
+    # NB: deliberately NOT including /usr/local/cuda/compat here. That dir
+    # holds a CUDA forward-compat *stub* libcuda.so, meant only for linking
+    # at build time on a machine with no real GPU/driver present (see the
+    # IDG cmake step's -DCMAKE_LIBRARY_PATH above). At run time with --nv,
+    # apptainer binds in the *real* host driver's libcuda.so; if the stub
+    # were also on LD_LIBRARY_PATH it could shadow that real driver lib and
+    # cause "unsupported display driver / cuda driver combination" even
+    # though the host driver is fine.
+    export LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib64:${LD_LIBRARY_PATH:-}"
+    export PATH="/usr/local/bin:${PATH}"
+    export EVERYBEAM_DATADIR=/usr/local/share/everybeam
+
+%runscript
+    exec wsclean "$@"
+
+%test
+    set -e
+    # wsclean links libidg-cuda.so directly (not dlopen'd on demand), so it
+    # needs a real libcuda.so.1 just to *start*, --version included. This
+    # %test runs automatically as part of `apptainer build`, unconditionally
+    # and without --nv, so on a build node with no NVIDIA driver at all
+    # (this cluster's standard-* nodes) that's expected to be unresolvable
+    # here -- it's not a packaging bug, just this environment. Don't hard-
+    # fail the build over it; the real check is test_gpu.slurm on a100_gpu.
+    # Do still hard-fail on any *other* missing shared library, which would
+    # be a real problem.
+    missing="$(ldd /usr/local/bin/wsclean 2>&1 | grep 'not found' || true)"
+    other_missing="$(echo "${missing}" | grep -v 'libcuda\.so\.1' || true)"
+    if [ -n "${other_missing}" ]; then
+        echo "FATAL: wsclean is missing shared libraries unrelated to the driver:" >&2
+        echo "${other_missing}" >&2
+        exit 1
+    fi
+    if [ -n "${missing}" ]; then
+        echo "== wsclean cannot fully load here (no NVIDIA driver on this build node) =="
+        echo "${missing}"
+        echo "This is expected -- run with 'apptainer exec --nv' on a GPU node instead" \
+             "(this cluster: -p a100_gpu). Skipping the --version exec check."
+    else
+        echo "== wsclean --version =="
+        wsclean --version
+    fi
+    echo "== GPU visibility (informational; needs --nv + GPU allocation to succeed) =="
+    if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+        nvidia-smi -L
+    else
+        echo "nvidia-smi not available/no GPU bound at test time -- expected unless" \
+             "this test is run with 'apptainer test --nv' on a GPU node."
+    fi
